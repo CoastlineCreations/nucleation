@@ -34,16 +34,25 @@ world import (from zip) and export, the schematic builder, the procedural buildi
 definition regions, diff and fingerprinting, autostack, NBT helpers, SDF sampling, and the
 in-memory store.
 
-Redstone simulation and mesh generation also work on WASM but are not compiled into the
-published binary. To use them, build a custom WASM from the
-[repository](https://github.com/Schem-at/Nucleation):
+The main entry also includes the vanilla tick engine (`mc-tick`), the MCHPRS redstone
+world and typed circuits (`simulation`), mesh generation (`meshing`), and model
+voxelization (`voxelize`). `mc-tick` and `simulation` are separate features; enabling
+one does not provide the other. GPU rendering and embedded scripting are native-only.
+
+To build and verify a local package from the repository, install Rust's
+`wasm32-unknown-unknown` target and Node 18+, then run:
 
 ```bash
-cargo build --release --target wasm32-unknown-unknown --lib --features bridge,simulation,meshing
+rustup target add wasm32-unknown-unknown
+RUSTC_WRAPPER= tools/package-npm.sh dist/npm
+node tools/test-npm-package.mjs dist/npm
 ```
 
-and point the package's `diplomat.config.mjs` at your `nucleation.wasm`. GPU rendering and
-embedded scripting are native-only.
+`RUSTC_WRAPPER=` bypasses the repository's optional local sccache configuration.
+The package build uses the committed Cargo lockfile and checks the actual WASM exports.
+The smoke test packs and extracts a temporary npm archive, then executes real MCHPRS
+and circuit operations and the typed rendering API from its contents. It never publishes.
+Release CI also verifies the bundled `nucleation/renderer` entry with `--with-renderer`.
 
 ## Documentation
 

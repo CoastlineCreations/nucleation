@@ -6,18 +6,18 @@ cd "$(dirname "$0")/.."
 
 OUT="${1:-dist/npm}"
 
-# simulation+meshing ride along (schemati's flow runs redstone sim in the
-# browser); rendering (wgpu needs wasm-bindgen glue) and scripting (luajit
-# can't target wasm) stay out of the wasm build.
+# Both simulation engines and meshing ship in the main npm entry. Rendering
+# (wgpu needs wasm-bindgen glue) and scripting (luajit cannot target wasm) stay
+# out of the wasm build.
 # `mc-tick` is the headless tick engine (TickSimulation); `simulation` is the
-# separate MCHPRS-backed redstone world and is NOT what the browser apps use.
-# Naming the wrong one produces an engine that loads, meshes, and silently has
-# no TickSimulation at all — which is how a whole app came up dead.
+# separate MCHPRS-backed redstone world used by MchprsWorld, CircuitBuilder
+# and TypedCircuitExecutor. They are independent features: omitting either
+# produces generated JS methods whose WASM symbols do not exist.
 # `voxelize` is the mesh-to-voxel importer (Voxelizer: shape_from_obj,
 # shape_from_glb, schematic_from_glb_textured). Its deps are wasm-clean —
 # gltf rides with default-features off, and image only decodes bytes we hand
 # it — so the browser can import OBJ/GLB models without a server round trip.
-FEATURES="${NUCLEATION_WASM_FEATURES:-bridge,mc-tick,meshing,voxelize}"
+FEATURES="${NUCLEATION_WASM_FEATURES:-bridge,mc-tick,simulation,meshing,voxelize}"
 
 # ---------------------------------------------------------------- input guard
 # A release wasm build is minutes, and this script gets called from `npm run
@@ -46,8 +46,10 @@ fi
 stamp_inputs() {
   printf 'features=%s\n' "$FEATURES"
   find src crates bindings/js bindings/npm build.rs Cargo.toml Cargo.lock \
+    tools/package-npm.sh tools/verify-npm-exports.mjs tools/test-npm-package.mjs \
+    tools/test-render-stream.mjs \
     -type f \( -name '*.rs' -o -name '*.toml' -o -name '*.lock' -o -name '*.mjs' \
-               -o -name '*.ts' -o -name '*.mts' -o -name '*.json' -o -name '*.md' \) \
+               -o -name '*.ts' -o -name '*.mts' -o -name '*.json' -o -name '*.md' -o -name '*.sh' \) \
     -exec stat "$STAT_FLAG" "$STAT_FMT" {} + 2>/dev/null | sort
 }
 
@@ -57,12 +59,13 @@ STAMP="$(stamp_inputs | shasum -a 256 | cut -d' ' -f1)"
 if [[ -z "${NUCLEATION_FORCE_REBUILD:-}" \
       && -f "$STAMP_FILE" && -f "$OUT/nucleation.wasm" \
       && "$(cat "$STAMP_FILE" 2>/dev/null)" == "$STAMP" ]]; then
+  node tools/verify-npm-exports.mjs "$OUT" "$FEATURES"
   echo "npm package in $OUT is up to date (inputs unchanged) — skipping."
   echo "  force with NUCLEATION_FORCE_REBUILD=1"
   exit 0
 fi
 
-cargo build --release --target wasm32-unknown-unknown --lib --features "$FEATURES"
+cargo build --locked --release --target wasm32-unknown-unknown --lib --features "$FEATURES"
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -90,6 +93,8 @@ EOF
 # The generated glue imports ../diplomat.config.mjs (it expects to sit one level below
 # the config); rewrite to package-local.
 sed -i.bak "s#'../diplomat.config.mjs'#'./diplomat.config.mjs'#" "$OUT/diplomat-wasm.mjs" && rm "$OUT/diplomat-wasm.mjs.bak"
+
+node tools/verify-npm-exports.mjs "$OUT" "$FEATURES"
 
 printf '%s' "$STAMP" > "$STAMP_FILE"
 
